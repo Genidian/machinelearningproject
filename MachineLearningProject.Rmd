@@ -1,0 +1,115 @@
+---
+title: "MachineLearningProject"
+author: "Wellian Wiranto"
+date: "26 July 2015"
+output: html_document
+---
+
+#Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+#Datasets
+The training data for this project are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+#Saving and loading datasets
+```{r}
+setwd("~/Documents/Coursera")
+training <- read.csv("pml-training.csv", header=TRUE)
+testing <- read.csv("pml-testing.csv", header=TRUE)
+library(caret)
+library(randomForest)
+library(plyr)
+```
+
+#Data clean-up 1: Removing vars that are useless for predictions
+```{r}
+#Removing the first 7 columns from each data set. They contain descriptive stuff, such as usernames and timestamps.
+training <- subset(training, select=-c(1:7))
+testing<- subset(testing, select=-c(1:7))
+
+#Putting threshold for variables with 95% empty sets.
+threshold_val <- 0.95 * dim(training)[1]
+
+#Weeding out variables with empty contents totally or those which fail the thresholds
+include_columns <- !apply(training, 2, function(y) sum(is.na(y)) > threshold_val || sum(y=="") > threshold_val)
+training <- training[, include_columns]
+```
+
+#Data clean-up 2: Removing vars that are highly correlated with others
+```{r}
+# Making a correlation matrix to remove the columns which are highly correlated with each other
+# First, have to turn variables into numeric forms
+trainNum <- training[, sapply(training, is.numeric)]
+corrPlot <- cor(trainNum[, -length(names(trainNum))])
+library(corrplot)
+corrplot(corrPlot, method="color")
+
+# Putting a threshold value check here as well
+corr_matrix <- abs(cor(training[,-dim(training)[2]]))
+# Making the default diagonal values from '1' to '0', so that these values aren't included later 
+diag(corr_matrix) <- 0
+
+# Here we will be removing the columns which are highly correlated
+correlated_col <- findCorrelation(corr_matrix, verbose = FALSE , cutoff = .95)
+training <- training[, -c(correlated_col)]
+dim(training)
+```
+
+#Data Modelling
+Before we apply Random Forest Model, let's partition the training data into sub datasets first, as a way of cross-validation.
+```{r}
+#Dividing the training set
+inTrain = createDataPartition(training$classe, p=0.7, list=FALSE)
+train.One <- training[inTrain,]
+train.Two <- training[-inTrain,]
+#Putting into Random Forest Model
+randomForMod <- randomForest(classe~., data=train.One
+                             , importance=TRUE)
+randomForMod
+
+#Testing the model on training subset 2
+train.Two_pred <- predict(randomForMod, newdata=train.Two)
+# Showing the Confusion Matrix here :
+confuse <- confusionMatrix(train.Two_pred, train.Two$classe)
+confuse
+#The Confusion Matrix shows a model accuracy of 99.35%.
+
+#To check out-of-sample error value:
+sum(diag(confuse$table))/sum(confuse$table)
+
+#A look at the most important variables in this prediction model
+randomfImp <- varImp(randomForMod, scale=FALSE) 
+
+# This gives the plot for the top 25 important variables
+varImpPlot(randomForMod, top=25, main="Top 25 Variable Importance")
+```
+
+#Using the model on the Testing data set
+```{r}
+testing_pred <- predict(randomForMod, newdata=testing)
+testing_pred
+```
+
+
+#To submit answers
+```{r}
+answers <- c( "B", "A", "B", "A", "A", "E", "D", "B", "A", "A",
+              "B", "C", "B", "A", "E", "E", "A", "B", "B", "B")                        
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(answers)
+```
